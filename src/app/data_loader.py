@@ -14,14 +14,19 @@ def load_students(file_path: str) -> pd.DataFrame:
     df['ID'] = df.index
     return df
 
-def load_grades(file_path: str) -> pd.DataFrame:
-    '''Load grades from a separate file'''
-    path = Parh(file_path)
-    if not path.exists():
-        return pd.DataFrame(columns=['ID', 'Subject', 'Grade', 'Coefficient', 'Trimester'])
-    
-    return pd.read_csv(path)
-
-def save_grades(df: pd.DataFrame, file_path: str):
-    '''Save the grades to a CSV file'''
+def save_grades(df: pd.DataFrame, file_path:str):
+    '''Save the grades to a CSV file.'''
     df.to_csv(file_path, index = False)
+
+def load_grades(file_path: str) -> pd.DataFrame:
+    path = Path(file_path)
+    expected_cols = ["ID", "Full Name", "Grade", "Coefficient", "Trimester"]
+
+    if not path.exists():
+        return pd.DataFrame(columns=expected_cols)
+
+    df = pd.read_csv(path)
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = pd.Series(dtype="object")
+    return df[expected_cols]
