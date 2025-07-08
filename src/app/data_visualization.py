@@ -1,49 +1,35 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def plot_grade_distribution(df: pd.DataFrame, title = 'Greade distribution'):
-    '''Histogram of all grades'''
-    if df.empty: 
-        st.info('No grades to visualize.')
-        return
-    
-    plt.figure(figsize = (6, 4))
-    sns.histplot(df['Grade'], bins = 19, kde = True, color = 'skyblue', edgecolor = 'black')
-    plt.title(title)
-    plt.xlabel('Grade')
-    plt.label('Number of Students')
-    st.pyplot(plt.gcf())
-    plt.clf()
+def plot_grade_distribution(grade_matrix: pd.DataFrame, title="Grade Distribution"):
+    melted = grade_matrix.drop(columns=["Full Name"]).melt(value_name="Grade").dropna()
+    fig, ax = plt.subplots()
+    sns.histplot(melted["Grade"], bins=10, kde=True, ax=ax)
+    ax.set_title(title)
+    st.pyplot(fig)
 
-def plot_grades_by_trimester(df: pd.DataFrame):
-    '''Boxplot of grades by trimester.'''
-    if df.empty or 'Trimester' not in df.columns:
-        st.info('No trimester data to show.')
-        return
-    plt.figure(figsize = (6, 4))
-    sns.boxplot(data = df, x = 'Trimester', y = 'Grade', palette = 'pastel')
-    plt.title('Grades by trimester')
-    plt.xlabel('Trimester')
-    plt.ylabel('Grade')
-    st.pyplot(plt.gcf())
-    plt.clf()
+def plot_grades_by_assignment(grade_matrix: pd.DataFrame):
+    melted = grade_matrix.drop(columns=["Full Name"]).melt(var_name="Assignment", value_name="Grade").dropna()
+    fig, ax = plt.subplots()
+    sns.boxplot(x="Assignment", y="Grade", data=melted, ax=ax)
+    ax.set_title("Grade Distribution by Assignment")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45)
+    st.pyplot(fig)
 
-def plot_student_progress(df: pd.DataFrame, student_name: str):
-    '''Line plot of one student's grades across trimesters'''
-    if df.empty or 'Trimester' not in df.columns or 'Grade' not in df.columns:
-        st.info('No grade data available.')
+def plot_student_progress(grade_matrix: pd.DataFrame, student_name: str):
+    row = grade_matrix[grade_matrix["Full Name"] == student_name]
+    if row.empty:
+        st.warning("Student not found.")
         return
-    df = df[df['Full Name'] == student_name]
-    if df.empty:
-        st.infor('No grades for selected student.')
-    
-    df_sorted = df.sort_values('Trimester')
-    plt.figure(figsize = (6, 4))
-    sns.lineplot(data = df_sorted, x = 'Trimester', y = 'Grade', marker = 'o')
-    plt.title(f'Grade Progression: {student_name}')
-    plt.ytitle(0, 20)
-    st.pyplot(plt.gcf)
-    plt.clf()
-    
+
+    series = row.drop(columns=["Full Name"]).T.dropna().squeeze()
+    fig, ax = plt.subplots()
+    ax.plot(series.index, series.values, marker="o")
+    ax.set_title(f"Progress of {student_name}")
+    ax.set_ylabel("Grade")
+    ax.set_xlabel("Assignment")
+    ax.set_ylim(0, 6)
+    ax.grid(True)
+    st.pyplot(fig)

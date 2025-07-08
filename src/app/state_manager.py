@@ -1,15 +1,24 @@
-import streamlit as st
+import os
 import pandas as pd
-from app.data_loader import load_grades
+import streamlit as st
 
-def init_session_state(grades_path: str):
-    """
-    Initializes the grades table in session state, loading from the given class-specific CSV file.
-    """
-    if "grades_df" not in st.session_state:
-        df = load_grades(grades_path)
-        expected_cols = ["ID", "Full Name", "Grade", "Coefficient", "Trimester"]
-        for col in expected_cols:
-            if col not in df.columns:
-                df[col] = pd.Series(dtype="object")
-        st.session_state["grades_df"] = df[expected_cols]
+def init_session_state_matrix(grades_path: str, students_df: pd.DataFrame, class_name: str):
+    if st.session_state.get("current_class") != class_name or "grade_matrix" not in st.session_state:
+        # Grade matrix (load or initialize)
+        try:
+            df = pd.read_csv(grades_path)
+        except FileNotFoundError:
+            df = students_df[["Full Name"]].copy()
+        st.session_state["grade_matrix"] = df
+        st.session_state["grades_file"] = grades_path
+
+        # Load metadata
+        meta_file = f"data/assignments_meta_{class_name}.csv"
+        if os.path.exists(meta_file):
+            meta_df = pd.read_csv(meta_file)
+        else:
+            meta_df = pd.DataFrame(columns=["Assignment", "Coefficient", "Trimester"])
+        st.session_state["assignment_meta"] = meta_df  # ✅ This line is required!
+
+        # Track current class to reload on change
+        st.session_state["current_class"] = class_name
