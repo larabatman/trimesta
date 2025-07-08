@@ -1,134 +1,127 @@
 import streamlit as st
 import pandas as pd
 import os
-from app.data_loader import load_students, save_grades
-from app.state_manager import init_session_state
-from app.data_statistics import compute_weighted_average
-from app.ui_components import grade_entry_form
+from app.data_loader import load_students
+from app.state_manager import init_session_state_matrix
 from app.data_visualization import (
     plot_grade_distribution,
-    plot_grades_by_trimester,
+    plot_grades_by_assignment,
     plot_student_progress
 )
+from app.data_statistics import compute_student_weighted_average, compute_trimester_averages
 
-# -------------------------------
-# Sidebar: Class selection
-# -------------------------------
-st.sidebar.header('Class Selection')
-
-# Get all .xlsx files in /data folder (student files)
+# --- Class selection ---
+st.sidebar.header("Class Selection")
 xlsx_files = [f for f in os.listdir('data') if f.endswith('.xlsx')]
 available_classes = sorted([f.replace('.xlsx', '') for f in xlsx_files])
 
 if not available_classes:
-    st.error("No class files found in /data.")
+    st.error("No class files found.")
     st.stop()
 
 class_name = st.sidebar.selectbox("Choose a class", available_classes)
-student_file = f'data/{class_name}.xlsx'
-grades_file = f'data/grades_{class_name}.csv'
+student_file = f"data/{class_name}.xlsx"
+grades_file = f"data/grades_matrix_{class_name}.csv"
 
-# -------------------------------
-# Load data and initialize session state
-# -------------------------------
+# --- Load students and initialize matrix ---
 students_df = load_students(student_file)
-init_session_state(grades_path=grades_file)
-grades_df = st.session_state["grades_df"]
+init_session_state_matrix(grades_file, students_df, class_name)
+grade_matrix = st.session_state["grade_matrix"]
+meta_df = st.session_state["assignment_meta"]
 
-# -------------------------------
-# Title and student selection
-# -------------------------------
-st.title('Trimesta')
+# --- Assignment selector ---
+st.title("Trimesta (Assignments)")
+assignments = [col for col in grade_matrix.columns if col != "Full Name"]
+selected_assignment = st.selectbox("Select or add an assignment", assignments + ["➕ New assignment"])
 
-student_names = sorted(students_df['Full Name'].tolist())
-selected_name = st.selectbox("Choose a student", student_names, placeholder='Start typing a name...')
+# --- New assignment entry ---
+if selected_assignment == "➕ New assignment":
+    new_name = st.text_input("Enter new assignment name")
+    new_coeff = st.number_input("Coefficient (weight)", min_value=0.1, max_value=10.0, step=0.1, value=1.0)
+    new_trimester = st.selectbox("Trimester", ["T1", "T2", "T3"])
+    confirm = st.button("Create assignment")
 
-# Reset form inputs when switching students
-if "last_selected_student" not in st.session_state:
-    st.session_state["last_selected_student"] = None
+    if confirm and new_name and new_name not in grade_matrix.columns:
+        grade_matrix[new_name] = pd.NA
+        selected_assignment = new_name
+        st.success(f"Assignment '{new_name}' added.")
 
-if st.session_state["last_selected_student"] != selected_name:
-    st.session_state["grade_input"] = ""
-    st.session_state["coeff_input"] = "1.0"
-    st.session_state["trimester_input"] = "T1"
-    st.session_state["last_selected_student"] = selected_name
-
-# -------------------------------
-# Grade entry and processing
-# -------------------------------
-if selected_name:
-    st.success(f'Selected: {selected_name}')
-
-    selected_row = students_df[students_df["Full Name"] == selected_name]
-    if selected_row.empty:
-        st.error("Could not find the selected student.")
-        st.stop()
-
-    try:
-        student_id = int(selected_row["ID"].iloc[0])
-    except (KeyError, IndexError):
-        st.error("Student ID not found.")
-        st.stop()
-
-    grade, coeff, trimester, submitted = grade_entry_form()
-
-    if submitted and grade is not None and coeff is not None:
-        previous_grades = grades_df[grades_df["Full Name"] == selected_name]
-        previous_avg = compute_weighted_average(previous_grades)
-
-        new_row = {
-            'ID': student_id,
-            'Full Name': selected_name,
-            'Grade': grade,
-            'Coefficient': coeff,
-            'Trimester': trimester
-        }
-
-        st.session_state['grades_df'] = pd.concat(
-            [grades_df, pd.DataFrame([new_row])],
-            ignore_index=True
-        )
-
-        save_grades(st.session_state['grades_df'], grades_file)
-        st.success(f'Grade added: {grade} (Coeff: {coeff}) for {selected_name} in {trimester} and saved.')
-
-        if previous_avg is not None:
-            delta = round(grade - previous_avg, 2)
-            if delta > 0:
-                st.info(f"This grade is {delta} points above the previous average ({previous_avg}).")
-            elif delta < 0:
-                st.info(f"This grade is {abs(delta)} points below the previous average ({previous_avg}).")
-            else:
-                st.info("This grade matches the previous average.")
-
-# -------------------------------
-# Student's grade view and plot
-# -------------------------------
-    grades_df = st.session_state['grades_df']
-    student_grades = grades_df[grades_df['Full Name'] == selected_name] if 'Full Name' in grades_df.columns else pd.DataFrame()
-
-    if not student_grades.empty:
-        st.subheader('Grades for this student:')
-        st.dataframe(student_grades)
-
-        average = compute_weighted_average(student_grades)
-        if average is not None:
-            st.markdown(f'**Weighted Average:** {average}')
+        meta_file = f"data/assignments_meta_{class_name}.csv"
+        new_meta = pd.DataFrame([{"Assignment": new_name, "Coefficient": new_coeff, "Trimester": new_trimester}])
+        if os.path.exists(meta_file):
+            meta_df = pd.read_csv(meta_file)
+            meta_df = pd.concat([meta_df, new_meta], ignore_index=True)
         else:
-            st.warning('No valid grades to compute average.')
+            meta_df = new_meta
+        meta_df.to_csv(meta_file, index=False)
+        st.session_state["assignment_meta"] = meta_df
 
-        if st.checkbox("Show student's grade progression (line plot)"):
-            plot_student_progress(grades_df, selected_name)
+# --- Grade input for multiple students ---
+st.subheader(f"Assign grade for: {selected_assignment}")
+selected_students = st.multiselect("Select students", students_df["Full Name"].tolist())
+grade_input = st.text_input("Grade (e.g., 4.5)")
 
-# -------------------------------
-# Class-wide visualizations
-# -------------------------------
+if st.button("Assign Grade"):
+    try:
+        grade = float(grade_input.replace(",", "."))
+        for student in selected_students:
+            grade_matrix.loc[grade_matrix["Full Name"] == student, selected_assignment] = grade
+        st.success(f"Assigned grade {grade} to {len(selected_students)} student(s) for {selected_assignment}.")
+        st.session_state["last_assignment_edit"] = {
+            "assignment": selected_assignment,
+            "students": selected_students,
+            "grade": grade
+        }
+        grade_matrix.to_csv(grades_file, index=False)
+    except ValueError:
+        st.error("Invalid grade format.")
+
+# --- Undo last assignment-grade section ---
+if "last_assignment_edit" in st.session_state:
+    with st.expander("Undo last assigned grade"):
+        last = st.session_state["last_assignment_edit"]
+        st.write(f'Last: grade {last["grade"]} for assignment "{last["assignment"]}" to {len(last["students"])} student(s)')
+        if st.button("Undo Last Assignment Grade"):
+            for student in last["students"]:
+                grade_matrix.loc[grade_matrix["Full Name"] == student, last["assignment"]] = pd.NA
+            grade_matrix.to_csv(grades_file, index=False)
+            del st.session_state["last_assignment_edit"]
+            st.success("Last assigned grade has been removed.")
+            st.experimental_rerun()
+
+# --- Student view + weighted average ---
+with st.expander("Individual student analysis"):
+    student_name = st.selectbox("Pick a student", grade_matrix["Full Name"].tolist())
+    student_row = grade_matrix[grade_matrix["Full Name"] == student_name]
+
+    if not student_row.empty:
+        st.write("Grades for assignments:")
+        st.dataframe(student_row.T.rename(columns={student_row.index[0]: student_name}))
+
+        avg = compute_student_weighted_average(grade_matrix, meta_df, student_name)
+        if avg is not None:
+            st.markdown(f"**Weighted average (all trimesters):** {avg}")
+
+        if st.checkbox("Show grade progression"):
+            plot_student_progress(grade_matrix, student_name)
+
+# --- Trimester-specific averages ---
+st.markdown("---")
+st.subheader("Trimester summaries")
+avg_table = compute_trimester_averages(grade_matrix, meta_df)
+st.dataframe(avg_table)
+
+# --- Full class matrix ---
+st.markdown("---")
+st.subheader(f"Grade table for class {class_name}")
+st.dataframe(grade_matrix)
+
+# --- Class-wide visualizations ---
 st.markdown('---')
 st.subheader('Class visualizations')
 
 if st.checkbox('Show grade distribution histogram'):
-    plot_grade_distribution(grades_df, title=f'Grade Distribution — Class {class_name}')
+    plot_grade_distribution(grade_matrix, title=f"Grade Distribution — Class {class_name}")
 
-if st.checkbox('Show boxplot of grades by trimester'):
-    st.caption(f"Showing data for class: {class_name}")
-    plot_grades_by_trimester(grades_df)
+if st.checkbox('Show boxplot of grades by assignment'):
+    plot_grades_by_assignment(grade_matrix)
