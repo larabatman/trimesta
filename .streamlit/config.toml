@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#D97706"              # Warm orange, like a pencil
+backgroundColor = "#FFFDF6"           # Off-white paper feel
+secondaryBackgroundColor = "#F1F0E8"  # Light beige for sidebar or cards
+textColor = "#3B3A30"                 # Dark gray ink
+font = "serif"                        # Gives it a textbook feel

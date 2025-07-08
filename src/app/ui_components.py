@@ -9,7 +9,7 @@ def grade_entry_form():
     """
     with st.form('grade_entry'):
         grade_input = st.text_input('Enter grade', key='grade_input')
-        coeff_input = st.text_input('Coefficient (default = 1.0)', value="1.0", key='coeff_input')
+        coeff_input = st.text_input('Coefficient (default = 1.0)', key='coeff_input')
         trimester = st.selectbox('Trimester', ['T1', 'T2', 'T3'], key='trimester_input')
         submit = st.form_submit_button('Add Grade')
 

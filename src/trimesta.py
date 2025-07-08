@@ -1,25 +1,49 @@
 import streamlit as st
 import pandas as pd
+import os
 from app.data_loader import load_students, save_grades
 from app.state_manager import init_session_state
 from app.data_statistics import compute_weighted_average
 from app.ui_components import grade_entry_form
+from app.data_visualization import (
+    plot_grade_distribution,
+    plot_grades_by_trimester,
+    plot_student_progress
+)
 
-# Load students from Excel
-students_df = load_students('data/901.xlsx')
+# -------------------------------
+# Sidebar: Class selection
+# -------------------------------
+st.sidebar.header('Class Selection')
 
-# Initialize session state (grades_df, etc.)
-init_session_state()
+# Get all .xlsx files in /data folder (student files)
+xlsx_files = [f for f in os.listdir('data') if f.endswith('.xlsx')]
+available_classes = sorted([f.replace('.xlsx', '') for f in xlsx_files])
+
+if not available_classes:
+    st.error("No class files found in /data.")
+    st.stop()
+
+class_name = st.sidebar.selectbox("Choose a class", available_classes)
+student_file = f'data/{class_name}.xlsx'
+grades_file = f'data/grades_{class_name}.csv'
+
+# -------------------------------
+# Load data and initialize session state
+# -------------------------------
+students_df = load_students(student_file)
+init_session_state(grades_path=grades_file)
 grades_df = st.session_state["grades_df"]
 
-# Title
+# -------------------------------
+# Title and student selection
+# -------------------------------
 st.title('Trimesta')
 
-# Sort and display student list
 student_names = sorted(students_df['Full Name'].tolist())
 selected_name = st.selectbox("Choose a student", student_names, placeholder='Start typing a name...')
 
-# Initialize and clear form inputs if student changes
+# Reset form inputs when switching students
 if "last_selected_student" not in st.session_state:
     st.session_state["last_selected_student"] = None
 
@@ -29,11 +53,12 @@ if st.session_state["last_selected_student"] != selected_name:
     st.session_state["trimester_input"] = "T1"
     st.session_state["last_selected_student"] = selected_name
 
-# Show selected student
+# -------------------------------
+# Grade entry and processing
+# -------------------------------
 if selected_name:
     st.success(f'Selected: {selected_name}')
 
-    # Get student ID safely
     selected_row = students_df[students_df["Full Name"] == selected_name]
     if selected_row.empty:
         st.error("Could not find the selected student.")
@@ -42,13 +67,15 @@ if selected_name:
     try:
         student_id = int(selected_row["ID"].iloc[0])
     except (KeyError, IndexError):
-        st.error("Student ID not found in the table.")
+        st.error("Student ID not found.")
         st.stop()
 
-    # Grade entry form
     grade, coeff, trimester, submitted = grade_entry_form()
 
     if submitted and grade is not None and coeff is not None:
+        previous_grades = grades_df[grades_df["Full Name"] == selected_name]
+        previous_avg = compute_weighted_average(previous_grades)
+
         new_row = {
             'ID': student_id,
             'Full Name': selected_name,
@@ -62,17 +89,23 @@ if selected_name:
             ignore_index=True
         )
 
-        # Auto-save to CSV
-        save_grades(st.session_state['grades_df'], "data/grades_901.csv")
-
+        save_grades(st.session_state['grades_df'], grades_file)
         st.success(f'Grade added: {grade} (Coeff: {coeff}) for {selected_name} in {trimester} and saved.')
 
-    # Show current grades for this student
+        if previous_avg is not None:
+            delta = round(grade - previous_avg, 2)
+            if delta > 0:
+                st.info(f"This grade is {delta} points above the previous average ({previous_avg}).")
+            elif delta < 0:
+                st.info(f"This grade is {abs(delta)} points below the previous average ({previous_avg}).")
+            else:
+                st.info("This grade matches the previous average.")
+
+# -------------------------------
+# Student's grade view and plot
+# -------------------------------
     grades_df = st.session_state['grades_df']
-    if 'Full Name' in grades_df.columns and not grades_df.empty:
-        student_grades = grades_df[grades_df['Full Name'] == selected_name]
-    else:
-        student_grades = pd.DataFrame(columns=grades_df.columns)
+    student_grades = grades_df[grades_df['Full Name'] == selected_name] if 'Full Name' in grades_df.columns else pd.DataFrame()
 
     if not student_grades.empty:
         st.subheader('Grades for this student:')
@@ -83,3 +116,19 @@ if selected_name:
             st.markdown(f'**Weighted Average:** {average}')
         else:
             st.warning('No valid grades to compute average.')
+
+        if st.checkbox("Show student's grade progression (line plot)"):
+            plot_student_progress(grades_df, selected_name)
+
+# -------------------------------
+# Class-wide visualizations
+# -------------------------------
+st.markdown('---')
+st.subheader('Class visualizations')
+
+if st.checkbox('Show grade distribution histogram'):
+    plot_grade_distribution(grades_df, title=f'Grade Distribution — Class {class_name}')
+
+if st.checkbox('Show boxplot of grades by trimester'):
+    st.caption(f"Showing data for class: {class_name}")
+    plot_grades_by_trimester(grades_df)
