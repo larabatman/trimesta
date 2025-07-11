@@ -6,7 +6,8 @@ from app.state_manager import init_session_state_matrix
 from app.data_visualization import (
     plot_grade_distribution,
     plot_grades_by_assignment,
-    plot_student_progress
+    plot_student_progress, 
+    plot_class_trimester_summary
 )
 from app.data_statistics import compute_student_weighted_average, compute_trimester_averages
 
@@ -91,7 +92,6 @@ if st.button("Assign Grade"):
     except ValueError:
         st.error("Invalid grade format.")
 
-
 # --- Undo last entry ---
 if "last_assignment_edit" in st.session_state:
     with st.expander("Undo last assigned grade"):
@@ -138,6 +138,9 @@ if st.checkbox("Show grade distribution histogram"):
 
 if st.checkbox("Show boxplot of grades by assignment"):
     plot_grades_by_assignment(grade_matrix)
+
+if st.checkbox('Show class average per assignment by trimester'):
+    plot_class_trimester_summary(grade_matrix, meta_df)
 
 if st.checkbox("Show a student's grade progression"):
     name = st.selectbox("Select student", grade_matrix["Full Name"].tolist(), key="progress_name")

@@ -3,6 +3,47 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFrame):
+    """
+    Plots the average grade per assignment grouped by trimester.
+    Only includes assignments that exist in both the grade matrix and metadata.
+    """
+    meta = meta_df.copy()
+    meta = meta[meta["Assignment"].isin(grade_matrix.columns)]  # only keep assignments that exist
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = {"T1": "#8ecae6", "T2": "#ffb703", "T3": "#90be6d"}
+
+    plotted_any = False
+
+    for trimester in ["T1", "T2", "T3"]:
+        trimester_assignments = meta[meta["Trimester"] == trimester]["Assignment"]
+        if not trimester_assignments.empty:
+            means = grade_matrix[trimester_assignments].mean(skipna=True)
+            ax.plot(
+                means.index,
+                means.values,
+                marker="o",
+                label=f"{trimester} average",
+                color=colors[trimester],
+                linewidth=2,
+            )
+            plotted_any = True
+
+    if not plotted_any:
+        st.info("No trimester-tagged assignments available for class summary.")
+        return
+
+    ax.set_title("Class average per assignment by trimester")
+    ax.set_ylabel("Grade")
+    ax.set_ylim(0, 6.5)
+    ax.set_xticks(range(len(means.index)))
+    ax.set_xticklabels(means.index, rotation=45, ha="right")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend()
+    st.pyplot(fig)
+
+
 def plot_grade_distribution(grade_matrix: pd.DataFrame, title="Grade Distribution"):
     melted = grade_matrix.drop(columns=["Full Name"]).melt(value_name="Grade").dropna()
     fig, ax = plt.subplots()
