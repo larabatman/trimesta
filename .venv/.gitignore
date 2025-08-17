@@ -1,0 +1,61 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+# --- OS / Editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.code-workspace
+
+# --- Python / Build ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.cache/
+.tox/
+.coverage*
+coverage.xml
+htmlcov/
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+!.streamlit/config.toml
+
+# --- Env files ---
+.env
+*.env
+
+# --- Logs / Temp ---
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+
+# --- Data (generated) ---
+data/grades_matrix_*.csv
+data/assignments_meta_*.csv
+
+# Optional: keep Excel class lists tracked
+# (comment these out if you also want to ignore xlsx)
+# !data/*.xlsx
