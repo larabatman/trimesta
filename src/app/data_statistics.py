@@ -1,33 +1,25 @@
+# src/app/data_statistics.py
 import pandas as pd
 
-# --- Petits utilitaires de normalisation -------------------------------
-
+# ---------- Helpers ----------
 def _normalize_name_column(df: pd.DataFrame) -> str:
-    """Retourne le nom de la colonne à utiliser pour le nom complet de l'élève."""
-    candidates = ["Full Name", "Nom complet", "Nom Complet", "Nom"]
-    for c in candidates:
+    for c in ["Full Name", "Nom complet", "Nom Complet", "Nom"]:
         if c in df.columns:
             return c
-    # Par défaut, on suppose 'Full Name' (la plupart du temps créé par load_students)
     return "Full Name"
 
 def _normalize_meta_columns(meta_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Renomme les colonnes du méta-dataframe d'évaluations en anglais interne :
-    - Assignment  <- { "Assignment", "Évaluation", "Evaluation" }
-    - Coefficient <- { "Coefficient", "Pondération", "Ponderation" }
-    - Trimester   <- { "Trimester", "Trimestre" }
-    """
+    """Normalize meta columns to: Assignment, Coefficient, Trimester (accept FR/EN)."""
     if meta_df is None or meta_df.empty:
         return pd.DataFrame(columns=["Assignment", "Coefficient", "Trimester"])
-
     mapping = {}
-    lower_map = {c.strip().lower(): c for c in meta_df.columns}
+    lower_map = {str(c).strip().lower(): c for c in meta_df.columns}
 
-    def _pick(source_names, target):
-        for s in source_names:
-            if s.lower() in lower_map:
-                mapping[lower_map[s.lower()]] = target
+    def _pick(src_names, target):
+        for s in src_names:
+            key = s.lower()
+            if key in lower_map:
+                mapping[lower_map[key]] = target
                 return
 
     _pick(["Assignment", "Évaluation", "Evaluation"], "Assignment")
@@ -35,26 +27,20 @@ def _normalize_meta_columns(meta_df: pd.DataFrame) -> pd.DataFrame:
     _pick(["Trimester", "Trimestre"], "Trimester")
 
     meta = meta_df.rename(columns=mapping).copy()
-
-    # Ajoute colonnes manquantes si besoin
     for col in ["Assignment", "Coefficient", "Trimester"]:
         if col not in meta.columns:
             meta[col] = pd.Series(dtype="object")
-
     return meta[["Assignment", "Coefficient", "Trimester"]]
 
-
-# --- Fonctions principales --------------------------------------------
-
+# ---------- Public API ----------
 def compute_student_weighted_average(
     grade_matrix: pd.DataFrame,
     meta_df: pd.DataFrame,
     student_name: str
 ):
     """
-    Calcule la moyenne pondérée d’un élève à partir des coefficients d’évaluations.
-    Retourne un float (arrondi à 2 décimales) ou None si non calculable.
-    Accepte des colonnes FR/EN pour les métadonnées (Évaluation/Trimestre/…).
+    Weighted average for a single student. Falls back to weight=1.0 when meta is missing.
+    Returns float rounded to 2 decimals, or None if not computable.
     """
     if grade_matrix is None or grade_matrix.empty:
         return None
@@ -64,129 +50,105 @@ def compute_student_weighted_average(
         return None
 
     row = grade_matrix[grade_matrix[name_col] == student_name]
-    if row.empty or row.shape[1] <= 1:
+    if row.empty:
         return None
 
-    # Série des notes (toutes les colonnes sauf le nom)
-    grades = row.drop(columns=[name_col]).squeeze()
-
-    # S’assure qu’on a une Series (et pas un scalaire / NA)
-    if not isinstance(grades, pd.Series):
+    assignment_cols = [c for c in grade_matrix.columns if c != name_col]
+    if not assignment_cols:
         return None
 
-    # Évaluations avec des valeurs numériques
-    valid_assignments = grades.dropna().index.tolist()
-    if not valid_assignments:
+    grades = pd.to_numeric(row.iloc[0][assignment_cols], errors="coerce").dropna()
+    if grades.empty:
         return None
 
-    # Normalise les colonnes du méta-dataframe
     meta = _normalize_meta_columns(meta_df).set_index("Assignment")
+    # default weights = 1.0
+    weights = pd.Series(1.0, index=grades.index)
+    if not meta.empty:
+        w = pd.to_numeric(meta.reindex(grades.index)["Coefficient"], errors="coerce")
+        weights = w.fillna(1.0)
 
-    # Restreint le méta aux évaluations présentes
-    meta = meta.reindex(valid_assignments)
-
-    # Coeffs (défaut 1.0)
-    weights = pd.to_numeric(meta["Coefficient"], errors="coerce").fillna(1.0)
-
-    # Valeurs des notes (numériques)
-    values = pd.to_numeric(grades[valid_assignments], errors="coerce")
-    mask = values.notna() & weights.notna()
-
-    values = values[mask]
+    mask = grades.notna() & weights.notna()
+    grades = grades[mask]
     weights = weights[mask]
-
-    if values.empty or weights.sum() == 0:
+    if grades.empty or weights.sum() == 0:
         return None
 
-    weighted_avg = (values * weights).sum() / weights.sum()
-    return round(float(weighted_avg), 2)
-
+    avg = (grades * weights).sum() / weights.sum()
+    return round(float(avg), 2)
 
 def compute_trimester_averages(
     grade_matrix: pd.DataFrame,
     meta_df: pd.DataFrame
 ) -> pd.DataFrame:
     """
-    Calcule les moyennes pondérées par élève pour chaque trimestre (T1, T2, T3)
-    ainsi que la moyenne globale.
-    Retourne un DataFrame :
-        | Full Name       | T1   | T2   | T3   | Global |
-    Accepte des colonnes FR/EN pour les métadonnées.
+    Per-student weighted averages by trimester plus global.
+    Returns DataFrame with columns: ['Full Name','T1','T2','T3','Global'].
     """
+    empty_out = pd.DataFrame(columns=["Full Name", "T1", "T2", "T3", "Global"])
+
     if grade_matrix is None or grade_matrix.empty:
-        return pd.DataFrame(columns=["Full Name", "T1", "T2", "T3", "Global"])
+        return empty_out
 
     name_col = _normalize_name_column(grade_matrix)
     if name_col not in grade_matrix.columns:
-        return pd.DataFrame(columns=["Full Name", "T1", "T2", "T3", "Global"])
+        return empty_out
 
-    result = { "Full Name": grade_matrix[name_col] }
-    student_names = grade_matrix[name_col].tolist()
+    result = {"Full Name": grade_matrix[name_col].tolist()}
+    student_count = len(grade_matrix)
 
-    # Normalise métadonnées
     meta = _normalize_meta_columns(meta_df).copy()
-
-    # Conserve uniquement les évaluations qui existent dans la matrice
+    # keep only assignments that exist in the matrix
     existing_assignments = [c for c in grade_matrix.columns if c != name_col]
     meta = meta[meta["Assignment"].isin(existing_assignments)]
 
-    # --- Par trimestre ---
+    # By trimester
     for trimester in ["T1", "T2", "T3"]:
         trimester_assignments = meta[meta["Trimester"] == trimester]["Assignment"].tolist()
-
         if not trimester_assignments:
-            result[trimester] = [None] * len(student_names)
+            result[trimester] = [None] * student_count
             continue
 
-        # Coefficients du trimestre (défaut 1.0)
-        coefs = pd.to_numeric(
-            meta.set_index("Assignment").loc[trimester_assignments]["Coefficient"],
-            errors="coerce"
-        ).fillna(1.0)
+        coefs = (
+            pd.to_numeric(
+                meta.set_index("Assignment").loc[trimester_assignments]["Coefficient"],
+                errors="coerce",
+            ).fillna(1.0)
+        )
 
-        # Sous-matrice {nom + colonnes d’évaluations du trimestre}
-        subset_cols = [name_col] + trimester_assignments
-        trimester_grades = grade_matrix[subset_cols].copy()
-
-        trimester_averages = []
-        for _, row in trimester_grades.iterrows():
-            grades = pd.to_numeric(row[trimester_assignments], errors="coerce")
-            valid_mask = grades.notna()
-            values = grades[valid_mask]
-            weights = coefs[valid_mask]
-
-            if values.empty or weights.sum() == 0:
-                trimester_averages.append(None)
+        values_list = []
+        for _, row in grade_matrix.iterrows():
+            grades = pd.to_numeric(row.reindex(trimester_assignments), errors="coerce")
+            valid = grades.notna()
+            vals = grades[valid]
+            wts = coefs[valid]
+            if vals.empty or wts.sum() == 0:
+                values_list.append(None)
             else:
-                avg = (values * weights).sum() / weights.sum()
-                trimester_averages.append(round(float(avg), 2))
+                avg = (vals * wts).sum() / wts.sum()
+                values_list.append(round(float(avg), 2))
+        result[trimester] = values_list
 
-        result[trimester] = trimester_averages
-
-    # --- Moyenne globale (toutes évaluations disponibles) ---
-    global_averages = []
+    # Global over all available assignments
     all_assignments = meta["Assignment"].tolist()
-
     if all_assignments:
         coefs_all = pd.to_numeric(
             meta.set_index("Assignment")["Coefficient"], errors="coerce"
         ).fillna(1.0)
 
+        global_list = []
         for _, row in grade_matrix.iterrows():
-            grades = pd.to_numeric(row[all_assignments], errors="coerce")
-            valid_mask = grades.notna()
-            values = grades[valid_mask]
-            weights = coefs_all[valid_mask]
-
-            if values.empty or weights.sum() == 0:
-                global_averages.append(None)
+            grades = pd.to_numeric(row.reindex(all_assignments), errors="coerce")
+            valid = grades.notna()
+            vals = grades[valid]
+            wts = coefs_all[valid]
+            if vals.empty or wts.sum() == 0:
+                global_list.append(None)
             else:
-                avg = (values * weights).sum() / weights.sum()
-                global_averages.append(round(float(avg), 2))
+                avg = (vals * wts).sum() / wts.sum()
+                global_list.append(round(float(avg), 2))
     else:
-        global_averages = [None] * len(student_names)
+        global_list = [None] * student_count
 
-    result["Global"] = global_averages
-
-    # On garde 'Full Name' comme clé interne pour compatibilité
+    result["Global"] = global_list
     return pd.DataFrame(result, columns=["Full Name", "T1", "T2", "T3", "Global"])

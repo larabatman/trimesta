@@ -1,0 +1,6 @@
+streamlit>=1.30,<2
+pandas>=2.2
+openpyxl>=3.1      # read/write .xlsx
+xlrd>=2.0          # read .xls
+matplotlib>=3.8
+seaborn>=0.13
