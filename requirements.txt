@@ -1,6 +1,16 @@
+# --- Cœur de l'app ---
 streamlit>=1.30,<2
-pandas>=2.2
-openpyxl>=3.1      # read/write .xlsx
-xlrd>=2.0          # read .xls
+pandas>=2.2,<3
+
+# --- I/O Excel ---
+openpyxl>=3.1        # lecture/écriture .xlsx
+xlrd>=2.0            # lecture .xls (legacy)
+XlsxWriter>=3.2      # export Excel avec images/plots
+
+# --- Graphiques & calculs ---
 matplotlib>=3.8
 seaborn>=0.13
+numpy>=1.26
+
+# Optionnel (souvent installé via Streamlit) :
+# pyarrow>=14.0.0    # sérialisation DataFrame (Arrow)
