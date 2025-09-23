@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 import shutil
+import json
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,86 @@ from app.data_statistics import (
 # =======================
 # Dossier des données (configurable via variable d'env)
 DATA_DIR = os.getenv("TRIMESTA_DATA_DIR", "data")
+
+
+
+# =======================
+# Fonctions utilitaires
+# =======================
+def _name_col(df: pd.DataFrame) -> str:
+    """Find the 'full name' column across FR/EN variants."""
+    for c in ["Full Name", "Nom complet", "Nom Complet", "Nom"]:
+        if c in df.columns:
+            return c
+    # Fallback to 'Full Name' for downstream logic
+    return "Full Name"
+
+def sanitize_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Make a copy that is Arrow-friendly:
+    - ensure name column is string
+    - coerce all other columns to numeric (NaN on errors)
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    name_col = _name_col(out)
+    if name_col in out.columns:
+        out[name_col] = out[name_col].astype(str)
+    for col in out.columns:
+        if col != name_col:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
+
+def make_backup(class_name, student_file, grades_file, meta_file, grade_matrix, meta_df, data_dir=DATA_DIR):
+    """
+    Crée un dossier d'instantané:
+      data/backups/<classe>/<YYYYmmdd-HHMMSS>/
+    avec:
+      - grades_matrix_<classe>.csv (depuis la DataFrame si dispo, sinon copie du fichier)
+      - assignments_meta_<classe>.csv (depuis la DataFrame si dispo, sinon copie du fichier)
+      - le fichier Excel d'élèves (.xls/.xlsx) original
+      - manifest.json
+    Retourne le Path du dossier de sauvegarde.
+    """
+    data_dir = Path(data_dir)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = data_dir / "backups" / class_name / timestamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Sauvegarde de la matrice de notes
+    grades_path = backup_dir / f"grades_matrix_{class_name}.csv"
+    if isinstance(grade_matrix, pd.DataFrame):
+        grade_matrix.to_csv(grades_path, index=False)
+    elif Path(grades_file).exists():
+        shutil.copy2(grades_file, grades_path)
+
+    # Sauvegarde des métadonnées d'évaluations
+    meta_path = backup_dir / f"assignments_meta_{class_name}.csv"
+    if isinstance(meta_df, pd.DataFrame):
+        meta_df.to_csv(meta_path, index=False)
+    elif Path(meta_file).exists():
+        shutil.copy2(meta_file, meta_path)
+
+    # Copie du fichier élèves (roster)
+    sf = Path(student_file)
+    if sf.exists():
+        shutil.copy2(sf, backup_dir / sf.name)
+
+    # Manifest
+    manifest = {
+        "class_name": class_name,
+        "created_at": timestamp,
+        "source_data_dir": str(Path(data_dir).resolve()),
+        "student_file": str(sf.name),
+        "grades_file": f"grades_matrix_{class_name}.csv",
+        "meta_file": f"assignments_meta_{class_name}.csv",
+        "files": sorted([p.name for p in backup_dir.iterdir() if p.is_file()]),
+    }
+    with open(backup_dir / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    return backup_dir
 
 
 # =======================
@@ -63,13 +144,45 @@ init_session_state_matrix(str(grades_file), students_df, class_name)
 grade_matrix = st.session_state["grade_matrix"]
 meta_df = st.session_state["assignment_meta"]
 
+# =======================
+# Sauvegardes (sidebar)
+# =======================
+with st.sidebar.expander("Sauvegardes"):
+    st.caption("Crée un instantané horodaté des fichiers de la classe (notes, métadonnées, liste d'élèves).")
+    if st.button("Créer une sauvegarde maintenant"):
+        try:
+            backup_dir = make_backup(
+                class_name=class_name,
+                student_file=student_file,
+                grades_file=grades_file,
+                meta_file=meta_file,
+                grade_matrix=st.session_state.get("grade_matrix"),
+                meta_df=st.session_state.get("assignment_meta"),
+                data_dir=DATA_DIR,
+            )
+            st.success(f"Sauvegarde créée : {backup_dir}")
+        except Exception as e:
+            st.error("Échec de la sauvegarde.")
+            st.exception(e)
+
+    # Liste des 5 dernières sauvegardes pour cette classe
+    base = Path(DATA_DIR) / "backups" / class_name
+    if base.exists():
+        last = sorted([p for p in base.iterdir() if p.is_dir()], reverse=True)[:5]
+        if last:
+            st.write("Sauvegardes récentes :")
+            for p in last:
+                st.write(f"- {p.name}")
+    else:
+        st.caption("Aucune sauvegarde pour cette classe pour le moment.")
+
 
 # ======================================
 # Tableau complet de la classe (en premier)
 # ======================================
 st.title("Trimesta — Suivi des évaluations")
 st.subheader(f"Tableau des notes — Classe {class_name}")
-st.dataframe(grade_matrix)
+st.dataframe(sanitize_for_display(grade_matrix))
 
 
 # ==========================
@@ -279,16 +392,21 @@ with st.expander("Analyse par élève"):
     if grade_matrix.empty:
         st.info("Aucune donnée à afficher.")
     else:
+        name_col = _name_col(grade_matrix)
         student_name = st.selectbox(
             "Choisir un élève",
-            grade_matrix["Full Name"].tolist(),
+            grade_matrix[name_col].tolist(),
             key="student_name_selectbox",
         )
-        student_row = grade_matrix[grade_matrix["Full Name"] == student_name]
+        student_row = grade_matrix[grade_matrix[name_col] == student_name]
 
         if not student_row.empty:
+            # Afficher proprement les notes par évaluation (sans la colonne du nom)
+            assignments_only = student_row.drop(columns=[name_col], errors="ignore")
+            series = pd.to_numeric(assignments_only.squeeze(), errors="coerce")
+            display_df = series.to_frame(name=student_name)  # une colonne, que des floats/NaN
             st.write("Notes par évaluation :")
-            st.dataframe(student_row.T.rename(columns={student_row.index[0]: student_name}))
+            st.dataframe(display_df)
 
             avg = compute_student_weighted_average(grade_matrix, meta_df, student_name)
             if avg is not None:
