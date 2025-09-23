@@ -43,6 +43,7 @@ def _normalize_meta(meta_df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------
 # Visualisations
 # -----------------------------
+
 def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFrame):
     """
     Affiche la moyenne de la classe par évaluation et par trimestre.
@@ -54,7 +55,10 @@ def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFra
 
     name_col = _name_col(grade_matrix)
     meta = _normalize_meta(meta_df)
-    meta = meta[meta["Assignment"].isin([c for c in grade_matrix.columns if c != name_col])]
+
+    # Ne garder que les évaluations qui existent dans la matrice
+    existing_cols = [c for c in grade_matrix.columns if c != name_col]
+    meta = meta[meta["Assignment"].isin(existing_cols)].copy()
 
     if meta.empty:
         st.info("Aucune évaluation associée à un trimestre n’est disponible pour la synthèse.")
@@ -65,11 +69,15 @@ def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFra
     plotted_any = False
 
     for trimester in ["T1", "T2", "T3"]:
-        trimester_assignments = meta[meta["Trimester"] == trimester]["Assignment"]
-        if not trimester_assignments.empty:
-            means = pd.to_numeric(
-                grade_matrix[trimester_assignments], errors="coerce"
-            ).mean(skipna=True)
+        cols = meta.loc[meta["Trimester"] == trimester, "Assignment"].tolist()
+        if cols:
+            # Sélection + conversion numérique colonne par colonne
+            sub = grade_matrix[cols].apply(pd.to_numeric, errors="coerce")
+            means = sub.mean(skipna=True)
+
+            # Préserver l’ordre d’origine des colonnes
+            means = means.reindex(cols)
+
             ax.plot(
                 means.index,
                 means.values,
