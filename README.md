@@ -1,9 +1,10 @@
 # Trimesta — Gestion de notes par évaluations (Streamlit)
 
-Trimesta est une application Streamlit pour gérer les notes d’une classe, centrée sur les **évaluations** (assignments).  
-Chaque évaluation est une **colonne** dans une matrice (lignes = élèves). L’app gère les **coefficients**, les **trimestres**, les **moyennes pondérées** (élève / trimestre / globale) et propose des **visualisations**.
+Trimesta est une application **Streamlit** pour gérer les notes d’une classe, centrée sur les **évaluations** (assignments).  
+Chaque évaluation est une **colonne** dans une matrice (lignes = élèves). L’app gère les **coefficients**, les **trimestres**, les **moyennes pondérées** (élève / trimestre / globale) et propose des **visualisations**.  
+Elle fonctionne **entièrement en local** et **anonymise automatiquement** les noms de famille à l’import.
 
-> **Confidentialité** : les **noms de famille sont systématiquement anonymisés** à l’import (suppression des voyelles, conservation de la première lettre). L’app fonctionne **entièrement en local**.
+> **Confidentialité** : anonymisation **obligatoire** du nom de famille à l’import (suppression des voyelles, conservation de la première lettre). Le prénom n’est pas modifié. Aucune donnée n’est envoyée en ligne.
 
 ---
 
@@ -15,6 +16,9 @@ Chaque évaluation est une **colonne** dans une matrice (lignes = élèves). L�
 - [Installation et lancement (Windows + VS Code)](#installation-et-lancement-windows--vs-code)
 - [Organisation des données](#organisation-des-données)
 - [Utilisation](#utilisation)
+- [Exemple guidé pas-à-pas](#exemple-guidé-pas-à-pas)
+- [Exports (Excel / PDF)](#exports-excel--pdf)
+- [Sauvegardes (instantanés)](#sauvegardes-instantanés)
 - [Validation et règles métier](#validation-et-règles-métier)
 - [Confidentialité et exécution locale](#confidentialité-et-exécution-locale)
 - [Dépannage (Windows)](#dépannage-windows)
@@ -29,18 +33,21 @@ Chaque évaluation est une **colonne** dans une matrice (lignes = élèves). L�
 - **Coefficient** et **trimestre** (T1, T2, T3) par évaluation.
 - **Saisie groupée** : attribuer la même note à plusieurs élèves d’un coup.
 - **Annuler la dernière attribution** (undo) en un clic.
+- **Renommer** ou **supprimer** une évaluation existante (avec sauvegarde automatique avant modification).
 - **Moyennes pondérées** :
   - par élève (tous trimestres),
   - par trimestre (T1/T2/T3),
   - globale (toutes évaluations).
 - **Visualisations** :
-  - histogramme global,
-  - boxplot par évaluation,
+  - histogramme global (échelle **dynamique** centrée sur les données ou **fixe** 0–6),
+  - boxplot par évaluation (avec points individuels),
   - progression d’un élève,
   - moyenne de classe par évaluation et par trimestre.
-- **Tolérance FR/EN** pour les colonnes des fichiers Excel.
+- **Exports** : génération d’un **rapport Excel** ou **PDF** personnalisable (choix des tableaux/graphes).
+- **Sauvegardes** : création d’un **instantané horodaté** des fichiers de la classe (notes, méta, liste d’élèves).
+- **Tolérance FR/EN** pour les colonnes des fichiers Excel (élèves + métadonnées).
 - **Décimales** : **virgule** ou **point** acceptés (ex. `4,5` ou `4.5`).
-- **Anonymisation obligatoire du nom de famille** à l’import (suppression des voyelles, conservation de la 1re lettre).
+- **Anonymisation obligatoire** du nom de famille à l’import (suppression des voyelles, 1re lettre conservée).
 
 ---
 
@@ -51,16 +58,17 @@ repo/
 ├─ src/
 │  ├─ trimesta.py                  # Application Streamlit (UI)
 │  └─ app/
-│     ├─ data_loader.py            # Import élèves (.xls/.xlsx), anonymisation, sauvegarde CSV
+│     ├─ data_loader.py            # Import élèves (.xls/.xlsx), anonymisation, sauvegarde CSV (legacy)
 │     ├─ state_manager.py          # Initialisation session/matrice/métadonnées
 │     ├─ data_statistics.py        # Moyennes pondérées (élève, trimestres, global)
 │     ├─ data_visualization.py     # Graphiques (histogramme, boxplot, progression, synthèse trimestres)
+│     ├─ export_utils.py           # Constructions Excel/PDF + helpers d’export
 │     └─ ui_components.py          # (optionnel / legacy)
 ├─ data/
 │  ├─ 901.xlsx / 1BI-11.xls        # Fichiers élèves (exemples)
-│  ├─ grades_matrix_901.csv        # Matrice de notes générée
-│  └─ assignments_meta_901.csv     # Métadonnées (coeff, trimestre) générées
-├─ .streamlit/config.toml          # (optionnel) config Streamlit locale
+│  ├─ grades_matrix_901.csv        # Matrice de notes (générée)
+│  └─ assignments_meta_901.csv     # Métadonnées (coeff, trimestre) (générées)
+├─ .streamlit/config.toml          # (optionnel) config thème/serveur Streamlit
 └─ requirements.txt
 ```
 
@@ -94,27 +102,27 @@ VS Code → **File > Open Folder…** → choisissez le dossier du repo.
 Ouvrez le **Terminal intégré** (Terminal > New Terminal).  
 Choisissez une des méthodes :
 
-**Méthode A — Command Prompt (simple)**
+**Méthode A — Command Prompt**
 ```bat
 py -3 -m venv .venv
-.\.venv\Scripts\activate.bat
+.\.venv\Scriptsctivate.bat
 ```
 
-**Méthode B — PowerShell (il faut autoriser une fois les scripts)**
+**Méthode B — PowerShell (autoriser une fois les scripts)**
 ```powershell
 py -3 -m venv .venv
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
 ```
 
-**Méthode C — Sans activer la venv (appeler Python de la venv directement)**
+**Méthode C — Sans activer la venv (commande module)**
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 .\.venv\Scripts\python -m streamlit run src/trimesta.py
 ```
 
-> Astuce : **Ctrl+Shift+P** → *Python: Select Interpreter* → choisissez celui de `.venv`.
+> Astuce : **Ctrl+Shift+P** → *Python: Select Interpreter* → choisissez `.venv`.
 
 ### 3) Installer les dépendances
 
@@ -130,6 +138,8 @@ openpyxl>=3.1
 xlrd>=2.0
 matplotlib>=3.8
 seaborn>=0.13
+numpy>=1.26
+XlsxWriter>=3.2
 ```
 
 ### 4) Lancer l’application
@@ -145,30 +155,22 @@ Le navigateur s’ouvre sur `http://localhost:8501`.
 
 ### Fichiers élèves (entrée)
 
-- Dossier : `data/` (modifiable via la variable d’environnement `TRIMESTA_DATA_DIR`).
+- Dossier : `data/` (modifiable via `TRIMESTA_DATA_DIR`).
 - Formats : **.xlsx** et **.xls** (les fichiers temporaires `~$...` sont ignorés).
-- L’app **détecte automatiquement** la ligne d’en-tête même si des lignes libres précèdent.
-
-Entêtes supportées (FR/EN) :
-- `Prénom` / `First Name`
-- `Nom` / `Last Name`
-- ou `Full Name` / `Nom complet`
-
-**Anonymisation** (obligatoire) :  
-`Full Name = Prénom + Nom_anonymisé`, où le **Nom** est transformé en **retirant toutes les voyelles** tout en **gardant la première lettre** (ex. *Duprez → Dprz*, *Lévy → Lv*). Le **Prénom** n’est pas modifié.
-
-**ID** : si une colonne `No` (ou équivalent) existe, elle est utilisée ; sinon, un ID séquentiel est généré.
+- L’app **gère les en-têtes FR/EN** : `Prénom` / `First Name`, `Nom` / `Last Name`, ou déjà `Full Name` / `Nom complet`.
+- **Anonymisation** : transformation du **Nom** en retirant toutes les voyelles, **en gardant la première lettre** (ex. *Duprez → Dprz*, *Lévy → Lv*). Le **Prénom** n’est pas modifié.
+- **ID** : si le fichier contient un identifiant (`No`), il est utilisé ; sinon un ID séquentiel est généré.
 
 ### Matrice de notes (travail / sortie)
 
 - Par classe : `grades_matrix_<classe>.csv` (créée automatiquement).
-- Lignes = `Full Name`
-- Colonnes = noms d’évaluations.
+- Lignes = `Full Name` (nom complet anonymisé)
+- Colonnes = **noms d’évaluations** (créées via l’UI).
 
-### Métadonnées d’évaluations (sortie)
+### Métadonnées des évaluations (sortie)
 
 - Par classe : `assignments_meta_<classe>.csv`
-- Colonnes : `Assignment`, `Coefficient`, `Trimester` (gérées via l’UI).
+- Colonnes : `Assignment`, `Coefficient`, `Trimester` (créées/complétées via l’UI).
 
 ---
 
@@ -176,34 +178,88 @@ Entêtes supportées (FR/EN) :
 
 ### 1) Choisir la classe
 Dans la barre latérale, choisissez un fichier **.xls** ou **.xlsx** du dossier `data/`.  
-Le tableau de la classe s’affiche immédiatement.
+Le tableau de la classe s’affiche immédiatement (colonnes = évaluations existantes, ou vide si aucune).
 
 ### 2) Ajouter une évaluation
-- Menu « Sélectionner ou ajouter une évaluation » → « ➕ Nouvelle évaluation »
-- Saisir le **nom**, le **coefficient**, et le **trimestre** (T1/T2/T3)
-- Cliquer sur **Créer l’évaluation**
+- Menu « **Sélectionner ou ajouter une évaluation** » → « **➕ Nouvelle évaluation** »
+- Saisir le **nom**, le **coefficient** (pondération), et le **trimestre** (T1/T2/T3)
+- Cliquer sur **Créer l’évaluation**  
+→ Une **colonne** est ajoutée à la matrice et une **ligne** au fichier méta.
 
 ### 3) Attribuer des notes
 - Sélectionner l’évaluation courante
 - Choisir un ou plusieurs élèves
 - Saisir la note (`0` à `6`, virgule ou point) → **Attribuer la note**  
-Les champs se **réinitialisent automatiquement** après l’attribution.
+Les champs se **réinitialisent automatiquement** après attribution.  
+Vous pouvez **Annuler la dernière attribution** depuis l’encart dédié.
 
-### 4) Annuler la dernière attribution
-- Ouvrir « Annuler la dernière attribution » → **Annuler cette attribution**  
-Les valeurs sont supprimées et la matrice est sauvegardée.
+### 4) Renommer / Supprimer une évaluation
+- Ouvrir « **Gérer l’évaluation sélectionnée** »
+- **Renommer** : saisir le nouveau nom puis **Renommer**  
+- **Supprimer** : cocher la confirmation puis **Supprimer**  
+L’app effectue une **sauvegarde .bak horodatée** des CSV avant modification.
 
 ### 5) Analyse par élève
-- Choisir un élève → voir ses notes et la **moyenne pondérée** (2 décimales + affichage arrondi au **dixième**)
-- Option : afficher la **progression** de l’élève.
+- Choisir un élève → voir ses notes par évaluation et sa **moyenne pondérée** (2 décimales + arrondi au **dixième**)
+- Option : afficher sa **progression** (courbe).
 
 ### 6) Synthèses et visualisations
 - **Synthèses par trimestre** : tableau des moyennes T1, T2, T3 + **Globale**
-- Visualisations :
-  - histogramme global,
-  - boxplot par évaluation,
-  - moyennes de classe par évaluation et **par trimestre**,
-  - progression d’un élève.
+- **Histogramme global** :
+  - **Échelle X dynamique** (centrée sur les données) **ou fixe** 0–6
+  - Échelle Y **auto** ou **taille de la classe**
+- **Boxplot** par évaluation (avec points individuels)
+- **Moyenne par évaluation et trimestre** (courbes superposées T1/T2/T3)
+- **Progression d’un élève**
+
+---
+
+## Exemple guidé pas-à-pas
+
+1. Placez un fichier `data\1BI-11.xls` (ou `901.xlsx`) avec les colonnes **Prénom** / **Nom** (ou **First Name** / **Last Name**).  
+   → À l’import, les noms de famille sont **anonymisés**.
+2. Lancez l’app. Dans la barre latérale, sélectionnez votre classe.  
+   Le tableau (vide si aucune évaluation) s’affiche.
+3. Ajoutez une évaluation : « **Contrôle 1** », coefficient **1.5**, trimestre **T1**.
+4. Cochez 5 élèves et attribuez-leur la note **4,5**. Répétez pour compléter.
+5. Vous vous trompez sur 2 élèves ? Ouvrez **Annuler la dernière attribution** et cliquez sur **Annuler**.
+6. Ouvrez **Gérer l’évaluation sélectionnée** et **renommez** « Contrôle 1 » en « Contrôle chapitre 1 ».
+7. Consultez **Analyse par élève**, affichez sa **progression**.
+8. Ouvrez **Synthèses par trimestre** et comparez T1/T2/T3.
+9. Dans **Visualisations**, affichez l’**Histogramme** en échelle **dynamique**, puis essayez l’échelle **fixe 0–6**.
+10. Dans la **barre latérale → Sauvegardes**, cliquez sur **Créer une sauvegarde maintenant**. Un dossier horodaté est créé.
+11. Enfin, dans **Exporter un rapport**, cochez :
+    - **Tableau des notes** et **Synthèses par trimestre**
+    - **Histogramme** (échelle dynamique), **Boxplot**, **Moyenne par trimestre**
+    - **Progression** pour 2 élèves  
+    Cliquez sur **Exporter en PDF** (ou **Excel**) et téléchargez votre rapport.
+
+---
+
+## Exports (Excel / PDF)
+
+Dans **Exporter un rapport** (en bas) :
+- Choisissez les **tables** à inclure : **Tableau des notes**, **Synthèses par trimestre**.
+- Choisissez les **graphes** : Histogramme (dynamique ou 0–6, Y auto ou classe), Boxplot, Moyenne par trimestre, Progression (tous / sélection).
+
+**Excel** : un classeur multi-feuilles est généré (`Notes`, `Synthèses`, `Meta`, `Graphiques` avec images).  
+**PDF** : un document multi-pages est généré (page titre, tables/graphes).
+
+> Dépendances requises : `XlsxWriter` pour insérer les images dans Excel.
+
+---
+
+## Sauvegardes (instantanés)
+
+Dans la barre latérale → **Sauvegardes** :
+- **Créer une sauvegarde maintenant** : produit `data/backups/<classe>/<YYYYmmdd-HHMMSS>/` contenant :
+  - `grades_matrix_<classe>.csv` (copie actuelle)
+  - `assignments_meta_<classe>.csv` (copie actuelle)
+  - le fichier élèves d’origine (`.xls/.xlsx`)
+  - `manifest.json` (métadonnées de la sauvegarde)
+- La liste des **5 dernières** sauvegardes s’affiche.
+
+**Restaurer** : copiez les fichiers du dossier de sauvegarde vers `data/` (en remplaçant les versions actuelles).
 
 ---
 
@@ -219,7 +275,7 @@ Les valeurs sont supprimées et la matrice est sauvegardée.
 ## Confidentialité et exécution locale
 
 - L’app ne contacte **aucun service externe** : tout se passe **en local**.
-- Forcer l’écoute sur localhost : créez `.streamlit/config.toml` :
+- Forcer l’écoute sur `localhost` : créez `.streamlit/config.toml` :
 ```toml
 [server]
 address = "127.0.0.1"
@@ -243,7 +299,7 @@ python -m streamlit run src/trimesta.py
 
 ## Dépannage (Windows)
 
-- **Le fichier .xls n’apparaît pas** : vérifiez qu’il est bien dans `data/` et que `xlrd` est installé :
+- **Le fichier .xls n’apparaît pas** : vérifiez qu’il est dans `data/` et que **xlrd** est installé :
 ```powershell
 python -m pip install xlrd
 ```
@@ -253,7 +309,7 @@ python -m pip install xlrd
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
-- **`streamlit` non reconnu** : utilisez la forme module (via la venv) :
+- **`streamlit` non reconnu** : utilisez la forme module :
 ```powershell
 python -m streamlit run src/trimesta.py
 ```
@@ -266,16 +322,16 @@ python -m streamlit run src/trimesta.py --server.port 8502
 - **Permission denied lors du clone** : clonez dans `Documents\` (évitez `C:\Program Files`).
 
 - **“No class files found in data.”** : placez un `.xls/.xlsx` valide dans `data/`.  
-  Entêtes recherchées : `Nom` + `Prénom` (ou `Last Name` + `First Name`), sinon `Full Name`.
+  Entêtes acceptées : `Nom` + `Prénom` (ou `Last Name` + `First Name`), sinon `Full Name`.
 
 ---
 
 ## Feuille de route
 
 - Suppression/édition d’une note **au choix** dans la matrice.
-- Export PDF/Excel (élève / classe).
+- Export PDF/Excel (élève / classe) plus détaillé.
 - Journal des modifications.
-- Auth simple si multi-professeurs.
+- Authentification simple si multi-professeurs.
 
 ---
 

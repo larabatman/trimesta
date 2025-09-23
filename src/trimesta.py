@@ -21,8 +21,6 @@ from app.data_statistics import (
 from pathlib import Path
 from datetime import datetime
 
-from matplotlib.backends.backend_pdf import PdfPages
-
 from app.export_utils import (
     name_col,
     sanitize_for_display,
