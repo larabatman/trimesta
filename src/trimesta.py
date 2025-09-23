@@ -1,6 +1,4 @@
 import os
-from pathlib import Path
-from datetime import datetime
 import shutil
 import json
 
@@ -20,41 +18,27 @@ from app.data_statistics import (
     compute_trimester_averages,
 )
 
+from pathlib import Path
+from datetime import datetime
+
+from matplotlib.backends.backend_pdf import PdfPages
+
+from app.export_utils import (
+    name_col,
+    sanitize_for_display,
+    build_excel_report,
+    build_pdf_report,
+)
+
 # =======================
 # Paramètres généraux
 # =======================
 # Dossier des données (configurable via variable d'env)
 DATA_DIR = os.getenv("TRIMESTA_DATA_DIR", "data")
 
-
-
 # =======================
 # Fonctions utilitaires
 # =======================
-def _name_col(df: pd.DataFrame) -> str:
-    """Find the 'full name' column across FR/EN variants."""
-    for c in ["Full Name", "Nom complet", "Nom Complet", "Nom"]:
-        if c in df.columns:
-            return c
-    # Fallback to 'Full Name' for downstream logic
-    return "Full Name"
-
-def sanitize_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Make a copy that is Arrow-friendly:
-    - ensure name column is string
-    - coerce all other columns to numeric (NaN on errors)
-    """
-    if df is None or df.empty:
-        return df
-    out = df.copy()
-    name_col = _name_col(out)
-    if name_col in out.columns:
-        out[name_col] = out[name_col].astype(str)
-    for col in out.columns:
-        if col != name_col:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-    return out
 
 def make_backup(class_name, student_file, grades_file, meta_file, grade_matrix, meta_df, data_dir=DATA_DIR):
     """
@@ -392,21 +376,20 @@ with st.expander("Analyse par élève"):
     if grade_matrix.empty:
         st.info("Aucune donnée à afficher.")
     else:
-        name_col = _name_col(grade_matrix)
+        ncol = name_col(grade_matrix)
         student_name = st.selectbox(
             "Choisir un élève",
-            grade_matrix[name_col].tolist(),
+            grade_matrix[ncol].tolist(),
             key="student_name_selectbox",
         )
-        student_row = grade_matrix[grade_matrix[name_col] == student_name]
 
-        if not student_row.empty:
-            # Afficher proprement les notes par évaluation (sans la colonne du nom)
-            assignments_only = student_row.drop(columns=[name_col], errors="ignore")
+        # Ligne de l'élève et série de notes (sans la colonne du nom)
+        row = grade_matrix[grade_matrix[ncol] == student_name]
+        if not row.empty:
+            assignments_only = row.drop(columns=[ncol], errors="ignore")
             series = pd.to_numeric(assignments_only.squeeze(), errors="coerce")
-            display_df = series.to_frame(name=student_name)  # une colonne, que des floats/NaN
             st.write("Notes par évaluation :")
-            st.dataframe(display_df)
+            st.dataframe(series.to_frame(name=student_name))  # 1 colonne, floats/NaN uniquement
 
             avg = compute_student_weighted_average(grade_matrix, meta_df, student_name)
             if avg is not None:
@@ -452,3 +435,93 @@ if st.checkbox("Afficher la moyenne de la classe par évaluation et par trimestr
 if st.checkbox("Afficher l’évolution des notes d’un élève"):
     name = st.selectbox("Sélectionner un élève", grade_matrix["Full Name"].tolist(), key="progress_name")
     plot_student_progress(grade_matrix, name)
+
+# ==========================
+# Export
+# ==========================
+st.markdown("---")
+st.subheader("Export")
+
+with st.expander("Exporter un rapport"):
+    # Tables à inclure
+    include_grades = st.checkbox("Inclure le tableau des notes de la classe", value=True)
+    include_trimester_table = st.checkbox("Inclure le tableau des moyennes par trimestre", value=True)
+
+    # Graphiques à inclure
+    st.caption("Graphiques à inclure :")
+    colA, colB = st.columns(2)
+    with colA:
+        opt_hist = st.checkbox("Histogramme global", value=False, key="exp_hist")
+        opt_box  = st.checkbox("Boxplot par évaluation", value=False, key="exp_box")
+    with colB:
+        opt_trim = st.checkbox("Moyenne par évaluation et trimestre", value=False, key="exp_trim")
+        opt_prog = st.checkbox("Progression par élève", value=False, key="exp_prog")
+
+    # Options d'histogramme
+    if opt_hist:
+        fixed = st.checkbox("Histogramme : échelle X fixe 0–6", value=False, key="exp_hist_fixed")
+        y_choice = st.radio("Histogramme : échelle Y", ["Auto", "Taille de la classe"], horizontal=True, index=0, key="exp_hist_y")
+    else:
+        fixed = False
+        y_choice = "Auto"
+
+    # Choix des élèves pour progression
+    prog_students = []
+    if opt_prog:
+        ncol = name_col(grade_matrix)
+        all_names = grade_matrix[ncol].tolist()
+        mode = st.radio("Progression :", ["Aucun", "Tous les élèves", "Sélection..."], horizontal=True, index=0, key="exp_prog_mode")
+        if mode == "Tous les élèves":
+            prog_students = all_names
+        elif mode == "Sélection...":
+            prog_students = st.multiselect("Choisir les élèves", all_names, key="exp_prog_students")
+
+    # -------- Export Excel --------
+    if st.button("Exporter en Excel (.xlsx)"):
+        try:
+            excel_bytes = build_excel_report(
+                grade_matrix, meta_df, class_name,
+                include_grades=include_grades,
+                include_trimester_table=include_trimester_table,
+                include_hist=opt_hist,
+                hist_fixed=fixed,
+                hist_y_mode=("class" if y_choice == "Taille de la classe" else "auto"),
+                include_box=opt_box,
+                include_trim_plot=opt_trim,
+                include_progress=opt_prog,
+                progress_students=prog_students if opt_prog else None,
+            )
+            st.download_button(
+                "Télécharger le rapport Excel",
+                data=excel_bytes,
+                file_name=f"rapport_{class_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        except Exception as e:
+            st.error("Échec de l’export Excel.")
+            st.exception(e)
+
+    # -------- Export PDF --------
+    if st.button("Exporter en PDF (.pdf)"):
+        try:
+            pdf_bytes = build_pdf_report(
+                grade_matrix, meta_df, class_name,
+                include_grades=include_grades,
+                include_trimester_table=include_trimester_table,
+                include_hist=opt_hist,
+                hist_fixed=fixed,
+                hist_y_mode=("class" if y_choice == "Taille de la classe" else "auto"),
+                include_box=opt_box,
+                include_trim_plot=opt_trim,
+                include_progress=opt_prog,
+                progress_students=prog_students if opt_prog else None,
+            )
+            st.download_button(
+                "Télécharger le rapport PDF",
+                data=pdf_bytes,
+                file_name=f"rapport_{class_name}.pdf",
+                mime="application/pdf",
+            )
+        except Exception as e:
+            st.error("Échec de l’export PDF.")
+            st.exception(e)
