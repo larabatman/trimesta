@@ -1,10 +1,13 @@
-import streamlit as st
+# src/app/data_visualization.py
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import streamlit as st
 
-# --- Utilitaires de normalisation --------------------------------------
-
+# -----------------------------
+# Utilitaires de normalisation
+# -----------------------------
 def _name_col(df: pd.DataFrame) -> str:
     """Retourne le nom de la colonne 'nom complet' (FR/EN)."""
     for c in ["Full Name", "Nom complet", "Nom Complet", "Nom"]:
@@ -17,13 +20,14 @@ def _normalize_meta(meta_df: pd.DataFrame) -> pd.DataFrame:
     if meta_df is None or meta_df.empty:
         return pd.DataFrame(columns=["Assignment", "Coefficient", "Trimester"])
 
-    lower_map = {c.strip().lower(): c for c in meta_df.columns}
+    lower_map = {str(c).strip().lower(): c for c in meta_df.columns}
     mapping = {}
 
     def pick(names, target):
         for n in names:
-            if n.lower() in lower_map:
-                mapping[lower_map[n.lower()]] = target
+            key = n.lower()
+            if key in lower_map:
+                mapping[lower_map[key]] = target
                 return
 
     pick(["Assignment", "Évaluation", "Evaluation"], "Assignment")
@@ -36,9 +40,9 @@ def _normalize_meta(meta_df: pd.DataFrame) -> pd.DataFrame:
             meta[col] = pd.Series(dtype="object")
     return meta[["Assignment", "Coefficient", "Trimester"]]
 
-
-# --- Visualisations -----------------------------------------------------
-
+# -----------------------------
+# Visualisations
+# -----------------------------
 def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFrame):
     """
     Affiche la moyenne de la classe par évaluation et par trimestre.
@@ -52,18 +56,20 @@ def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFra
     meta = _normalize_meta(meta_df)
     meta = meta[meta["Assignment"].isin([c for c in grade_matrix.columns if c != name_col])]
 
+    if meta.empty:
+        st.info("Aucune évaluation associée à un trimestre n’est disponible pour la synthèse.")
+        return
+
     fig, ax = plt.subplots(figsize=(10, 5))
     colors = {"T1": "#8ecae6", "T2": "#ffb703", "T3": "#90be6d"}
-
     plotted_any = False
+
     for trimester in ["T1", "T2", "T3"]:
         trimester_assignments = meta[meta["Trimester"] == trimester]["Assignment"]
         if not trimester_assignments.empty:
-            # Moyennes par évaluation pour ce trimestre
             means = pd.to_numeric(
                 grade_matrix[trimester_assignments], errors="coerce"
             ).mean(skipna=True)
-
             ax.plot(
                 means.index,
                 means.values,
@@ -86,109 +92,154 @@ def plot_class_trimester_summary(grade_matrix: pd.DataFrame, meta_df: pd.DataFra
     ax.legend(title="Trimestre")
     st.pyplot(fig)
 
-
-def plot_grade_distribution(grade_matrix: pd.DataFrame, title="Répartition des notes"):
+def plot_grade_distribution(
+    grade_matrix: pd.DataFrame,
+    title: str = "Répartition des notes",
+    fixed_scale: bool = False,     # False = zoom dynamique autour des données ; True = 0–6
+    y_mode: str = "auto",          # "auto" ou "class" (limite Y = taille de la classe)
+    show_guides: bool = True,      # afficher lignes moyenne/médiane
+):
     """
-    Histogramme de toutes les notes (toutes évaluations confondues).
+    Histogramme + KDE des notes.
+    - Échelle X :
+        * fixed_scale=True  -> [0, 6]
+        * fixed_scale=False -> bornes dynamiques (percentiles 1%–99% élargies), bornées à [0,6]
+    - Échelle Y :
+        * y_mode="auto"  -> auto avec petite marge
+        * y_mode="class" -> limite Y = nombre d'élèves (peut être plus joli pour une seule évaluation)
     """
-    if grade_matrix is None or grade_matrix.empty:
-        st.info("Aucune donnée de notes disponible.")
-        return
-
     name_col = _name_col(grade_matrix)
-    # Fondre toutes les colonnes d’évaluations
-    melted = (
-        grade_matrix.drop(columns=[name_col], errors="ignore")
-        .melt(value_name="Note")
-        .dropna(subset=["Note"])
-    )
+    df_num = grade_matrix.drop(columns=[name_col], errors="ignore")
+    grades = pd.to_numeric(df_num.values.ravel(), errors="coerce")
+    grades = pd.Series(grades).dropna()
 
-    # Conversion sûre en numérique
-    melted["Note"] = pd.to_numeric(melted["Note"], errors="coerce")
-    melted = melted.dropna(subset=["Note"])
-
-    if melted.empty:
-        st.info("Aucune note valide à afficher.")
+    if grades.empty:
+        st.info("Aucune note à afficher.")
         return
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    sns.histplot(melted["Note"], bins=12, binrange=(0, 6), kde=True, ax=ax)
+    # Bornes X
+    if fixed_scale:
+        xmin, xmax = 0.0, 6.0
+    else:
+        q1, q99 = np.percentile(grades, [1, 99])
+        xmin = max(0.0, q1 - 0.2)
+        xmax = min(6.0, q99 + 0.2)
+        if not np.isfinite(xmin) or not np.isfinite(xmax) or xmin >= xmax:
+            xmin = max(0.0, float(grades.min()) - 0.2)
+            xmax = min(6.0, float(grades.max()) + 0.2)
+        xmin = max(0.0, xmin)
+        xmax = min(6.0, xmax)
+
+    # Bins (Freedman–Diaconis)
+    n = len(grades)
+    q25, q75 = np.percentile(grades, [25, 75])
+    iqr = q75 - q25
+    if iqr > 0 and n > 1:
+        h = 2 * iqr / (n ** (1/3))
+        bins = int(np.ceil((xmax - xmin) / h)) if h > 0 else 10
+    else:
+        bins = min(10, max(3, n))
+    bins = max(3, min(60, bins))
+
+    # Tracé
+    fig, ax = plt.subplots(figsize=(8, 4))
+    sns.histplot(
+        grades,
+        bins=bins,
+        kde=(len(grades) >= 2),
+        ax=ax,
+        stat="count",
+        binrange=(xmin, xmax),
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    ax.set_xlim(xmin, xmax)
     ax.set_title(title)
     ax.set_xlabel("Note")
-    ax.set_xlim(0, 6)
-    ax.grid(axis="y", linestyle="--", alpha=0.5)
+    ax.set_ylabel("Effectifs")
+
+    # Lignes guides
+    if show_guides:
+        mean_v = float(grades.mean())
+        median_v = float(grades.median())
+        ax.axvline(mean_v, linestyle="--", linewidth=1, alpha=0.9, label=f"Moyenne {mean_v:.2f}")
+        ax.axvline(median_v, linestyle=":", linewidth=1, alpha=0.9, label=f"Médiane {median_v:.2f}")
+        ax.legend()
+
+    # Échelle Y
+    if y_mode == "class":
+        y_max = max(5, len(grade_matrix))
+        ax.set_ylim(0, y_max)
+    else:
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(0, ymax * 1.10)
+
+    ax.grid(True, linestyle="--", alpha=0.4)
     st.pyplot(fig)
 
-
-def plot_grades_by_assignment(grade_matrix: pd.DataFrame):
+def plot_grades_by_assignment(grade_matrix: pd.DataFrame, show_points: bool = True):
     """
-    Boxplot des notes par évaluation, avec points individuels en surimpression.
+    Boxplot des notes par évaluation, avec option pour afficher les points individuels.
     """
     if grade_matrix is None or grade_matrix.empty:
         st.info("Aucune donnée de notes disponible.")
         return
 
     name_col = _name_col(grade_matrix)
-    melted = (
-        grade_matrix.drop(columns=[name_col], errors="ignore")
-        .melt(var_name="Évaluation", value_name="Note")
-        .dropna(subset=["Note"])
-    )
-
-    melted["Note"] = pd.to_numeric(melted["Note"], errors="coerce")
-    melted = melted.dropna(subset=["Note"])
-
-    if melted.empty:
-        st.info("Aucune note valide à afficher.")
+    if name_col not in grade_matrix.columns or len(grade_matrix.columns) <= 1:
+        st.info("Pas assez de données pour tracer un boxplot.")
         return
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    sns.boxplot(x="Évaluation", y="Note", data=melted, ax=ax, palette="pastel")
-    sns.stripplot(x="Évaluation", y="Note", data=melted, ax=ax, color="black", alpha=0.6, jitter=True)
-    ax.set_title("Répartition des notes par évaluation")
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-    ax.set_ylim(0, 6.5)
-    ax.grid(axis="y", linestyle="--", alpha=0.5)
-    st.pyplot(fig)
+    melted = (
+        grade_matrix
+        .drop(columns=[name_col], errors="ignore")
+        .melt(var_name="Évaluation", value_name="Note")
+        .dropna()
+    )
+    if melted.empty:
+        st.info("Aucune note à afficher.")
+        return
 
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.boxplot(x="Évaluation", y="Note", data=melted, ax=ax)
+    if show_points:
+        sns.stripplot(x="Évaluation", y="Note", data=melted, ax=ax, color="black", alpha=0.35, jitter=True)
+
+    ax.set_title("Distribution des notes par évaluation")
+    ax.set_ylabel("Note")
+    ax.set_ylim(0, 6.0)
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    ax.grid(True, linestyle="--", alpha=0.4)
+    st.pyplot(fig)
 
 def plot_student_progress(grade_matrix: pd.DataFrame, student_name: str):
     """
-    Courbe d’évolution des notes pour un élève.
+    Courbe d’évolution des notes pour un élève donné.
     """
     if grade_matrix is None or grade_matrix.empty:
         st.info("Aucune donnée de notes disponible.")
         return
 
     name_col = _name_col(grade_matrix)
-    if name_col not in grade_matrix.columns:
-        st.warning("Colonne du nom d’élève introuvable.")
-        return
-
     row = grade_matrix[grade_matrix[name_col] == student_name]
     if row.empty:
         st.warning("Élève introuvable.")
         return
 
-    # Série des notes (index = évaluations)
     series = (
-        row.drop(columns=[name_col])
-        .T.squeeze()
+        pd.to_numeric(row.drop(columns=[name_col], errors="ignore").squeeze(), errors="coerce")
+        .dropna()
     )
-
-    # Conversion en numérique et suppression des NA
-    series = pd.to_numeric(series, errors="coerce").dropna()
-
     if series.empty:
         st.info("Aucune note disponible pour cet élève.")
         return
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(series.index, series.values, marker="o")
-    ax.set_title(f"Évolution de {student_name}")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(series.index, series.values, marker="o", linewidth=2)
+    ax.set_title(f"Évolution des notes — {student_name}")
     ax.set_ylabel("Note")
     ax.set_xlabel("Évaluation")
-    ax.set_ylim(0, 6.5)
-    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_ylim(0, 6.0)
+    ax.grid(True, linestyle="--", alpha=0.4)
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
     st.pyplot(fig)

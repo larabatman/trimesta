@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from datetime import datetime
+import shutil
 
 import pandas as pd
 import streamlit as st
@@ -110,6 +112,92 @@ if selected_assignment == "➕ Nouvelle évaluation":
             # Forcer un rafraîchissement pour que la nouvelle évaluation apparaisse dans la liste
             st.rerun()
 
+# --- Gestion de l’évaluation sélectionnée (renommer / supprimer) ---
+def _backup_csv(path_like):
+    """Crée une sauvegarde .bak horodatée du CSV avant modification."""
+    p = Path(path_like)
+    if p.exists():
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = p.with_suffix(p.suffix + f".bak-{ts}")
+        try:
+            shutil.copy(p, backup)
+        except Exception:
+            pass  # pas bloquant
+
+# Seulement si au moins 1 évaluation existe et qu’on n’est pas sur "➕ Nouvelle évaluation"
+assignments = [col for col in grade_matrix.columns if col != "Full Name"]
+if assignments and selected_assignment != "➕ Nouvelle évaluation":
+
+    with st.expander("Gérer l’évaluation sélectionnée"):
+        c1, c2 = st.columns(2)
+
+        # -------- Renommer --------
+        with c1:
+            st.write("Renommer l’évaluation")
+            new_name = st.text_input(
+                "Nouveau nom",
+                value=selected_assignment,
+                key="rename_eval_input",
+            )
+            if st.button("Renommer", key="btn_rename_eval"):
+                new_name = (new_name or "").strip()
+                if not new_name:
+                    st.warning("Veuillez saisir un nouveau nom.")
+                elif new_name == selected_assignment:
+                    st.info("Le nom est inchangé.")
+                elif new_name in grade_matrix.columns:
+                    st.error("Une évaluation porte déjà ce nom.")
+                else:
+                    # Sauvegardes
+                    _backup_csv(grades_file)
+                    _backup_csv(meta_file)
+
+                    # Renommer la colonne dans la matrice
+                    grade_matrix = grade_matrix.rename(columns={selected_assignment: new_name})
+                    st.session_state["grade_matrix"] = grade_matrix
+
+                    # Mettre à jour la méta (Assignment)
+                    if not meta_df.empty and "Assignment" in meta_df.columns:
+                        meta_df.loc[meta_df["Assignment"] == selected_assignment, "Assignment"] = new_name
+                        st.session_state["assignment_meta"] = meta_df
+
+                    # Sauvegarde sur disque
+                    grade_matrix.to_csv(grades_file, index=False)
+                    meta_df.to_csv(meta_file, index=False)
+
+                    st.success(f"Évaluation renommée en « {new_name} ».")
+                    st.rerun()
+
+        # -------- Supprimer --------
+        with c2:
+            st.write("Supprimer l’évaluation")
+            non_null = int(grade_matrix[selected_assignment].count())
+            st.caption(f"Valeurs non vides dans cette colonne : {non_null}")
+            confirm = st.checkbox("Je confirme la suppression définitive", key="confirm_delete_eval")
+
+            if st.button("Supprimer", key="btn_delete_eval"):
+                if not confirm:
+                    st.warning("Cochez la case de confirmation pour supprimer.")
+                else:
+                    # Sauvegardes
+                    _backup_csv(grades_file)
+                    _backup_csv(meta_file)
+
+                    # Supprimer la colonne de la matrice
+                    grade_matrix = grade_matrix.drop(columns=[selected_assignment])
+                    st.session_state["grade_matrix"] = grade_matrix
+
+                    # Retirer la ligne de méta correspondante
+                    if not meta_df.empty and "Assignment" in meta_df.columns:
+                        meta_df = meta_df[meta_df["Assignment"] != selected_assignment].copy()
+                        st.session_state["assignment_meta"] = meta_df
+
+                    # Sauvegarde sur disque
+                    grade_matrix.to_csv(grades_file, index=False)
+                    meta_df.to_csv(meta_file, index=False)
+
+                    st.success("Évaluation supprimée.")
+                    st.rerun()
 
 # ===========================================
 # Saisie de note pour plusieurs élèves
@@ -227,7 +315,15 @@ st.markdown("---")
 st.subheader("Visualisations de la classe")
 
 if st.checkbox("Afficher l’histogramme des notes"):
-    plot_grade_distribution(grade_matrix, title=f"Répartition des notes — Classe {class_name}")
+    with st.expander("Options histogramme"):
+        fixed = st.checkbox("Échelle X fixe de 0 à 6", value=False)
+        y_choice = st.radio("Échelle Y", ["Auto", "Taille de la classe"], horizontal=True, index=0)
+    plot_grade_distribution(
+        grade_matrix,
+        title=f"Répartition des notes — Classe {class_name}",
+        fixed_scale=fixed,
+        y_mode=("class" if y_choice == "Taille de la classe" else "auto"),
+    )
 
 if st.checkbox("Afficher le boxplot des notes par évaluation"):
     plot_grades_by_assignment(grade_matrix)
