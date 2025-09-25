@@ -366,7 +366,6 @@ if "last_assignment_edit" in st.session_state:
             st.success("La dernière attribution a été annulée.")
             st.rerun()
 
-
 # =====================
 # Analyse par élève
 # =====================
@@ -374,29 +373,41 @@ with st.expander("Analyse par élève"):
     if grade_matrix.empty:
         st.info("Aucune donnée à afficher.")
     else:
-        ncol = name_col(grade_matrix)
+        ncol = name_col(grade_matrix)  # détecte "Full Name"/"Nom complet"/...
         student_name = st.selectbox(
             "Choisir un élève",
-            grade_matrix[ncol].tolist(),
+            grade_matrix[ncol].astype(str).tolist(),
             key="student_name_selectbox",
         )
 
-        # Ligne de l'élève et série de notes (sans la colonne du nom)
-        row = grade_matrix[grade_matrix[ncol] == student_name]
-        if not row.empty:
-            assignments_only = row.drop(columns=[ncol], errors="ignore")
-            series = pd.to_numeric(assignments_only.squeeze(), errors="coerce")
-            st.write("Notes par évaluation :")
-            st.dataframe(series.to_frame(name=student_name))  # 1 colonne, floats/NaN uniquement
+        # Ligne de l'élève
+        row = grade_matrix.loc[grade_matrix[ncol] == student_name]
+        if row.empty:
+            st.warning("Élève introuvable.")
+        else:
+            # Retirer la colonne du nom -> uniquement les évaluations
+            row_no_name = row.drop(columns=[ncol], errors="ignore")
 
-            avg = compute_student_weighted_average(grade_matrix, meta_df, student_name)
-            if avg is not None:
-                st.markdown(f"**Moyenne pondérée (tous trimestres) :** {avg:.2f}")
-                st.markdown(f"**Moyenne pondérée arrondie (au dixième) :** {round(avg, 1)}")
+            # 0 colonne = aucune évaluation existante
+            if row_no_name.shape[1] == 0:
+                st.info("Aucune évaluation pour cet élève.")
+            else:
+                # Toujours une Series : prendre la 1re (et seule) ligne
+                series = pd.to_numeric(row_no_name.iloc[0], errors="coerce")
+                display_df = series.to_frame(name=student_name)
 
-            if st.checkbox("Afficher l’évolution des notes"):
-                plot_student_progress(grade_matrix, student_name)
+                st.write("Notes par évaluation :")
+                st.dataframe(display_df)
 
+                # Moyennes
+                avg = compute_student_weighted_average(grade_matrix, meta_df, student_name)
+                if avg is not None:
+                    st.markdown(f"**Moyenne pondérée (tous trimestres) :** {avg:.2f}")
+                    st.markdown(f"**Moyenne pondérée arrondie (au dixième) :** {round(avg, 1)}")
+
+                # Courbe de progression (clé dédiée pour éviter les collisions de widgets)
+                if st.checkbox("Afficher l’évolution des notes", key="progress_checkbox"):
+                    plot_student_progress(grade_matrix, student_name)
 
 # ==========================
 # Synthèses par trimestre
