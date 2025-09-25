@@ -1,2 +1,11 @@
-# Ignore .xls files
-*.xls
+# Excel rosters (never commit)
+data/**/*.xls
+data/**/*.xlsx
+
+# Generated class data (never commit)
+data/grades_matrix_*.csv
+data/assignments_meta_*.csv
+
+# Backups created by the app
+data/backups/
+*.bak-*
