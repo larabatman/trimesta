@@ -337,4 +337,4 @@ python -m streamlit run src/trimesta.py --server.port 8502
 
 ## Licence
 
-À définir (ex. MIT).
+GLP-3.0
