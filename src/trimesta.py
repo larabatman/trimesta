@@ -28,6 +28,15 @@ from app.export_utils import (
     build_pdf_report,
 )
 
+from app.backup import (
+    make_backup,
+    list_backups_for_class,
+    load_backup_manifest,
+    restore_backup_overwrite,
+    restore_backup_as_copy,
+)
+
+
 # =======================
 # Paramètres généraux
 # =======================
@@ -131,6 +140,7 @@ meta_df = st.session_state["assignment_meta"]
 # =======================
 with st.sidebar.expander("Sauvegardes"):
     st.caption("Crée un instantané horodaté des fichiers de la classe (notes, métadonnées, liste d'élèves).")
+
     if st.button("Créer une sauvegarde maintenant"):
         try:
             backup_dir = make_backup(
@@ -147,18 +157,92 @@ with st.sidebar.expander("Sauvegardes"):
             st.error("Échec de la sauvegarde.")
             st.exception(e)
 
-    # Liste des 5 dernières sauvegardes pour cette classe
-    base = Path(DATA_DIR) / "backups" / class_name
-    if base.exists():
-        last = sorted([p for p in base.iterdir() if p.is_dir()], reverse=True)[:5]
-        if last:
-            st.write("Sauvegardes récentes :")
-            for p in last:
-                st.write(f"- {p.name}")
+    backups = list_backups_for_class(class_name, DATA_DIR)
+    if backups:
+        st.write("Sauvegardes récentes :")
+        for p in backups[:5]:
+            st.write(f"- {p.name}")
     else:
         st.caption("Aucune sauvegarde pour cette classe pour le moment.")
 
+    st.markdown("---")
+    st.subheader("Restaurer une sauvegarde")
 
+    if not backups:
+        st.info("Aucune sauvegarde disponible.")
+    else:
+        # Téléchargements de sécurité (état courant)
+        with st.expander("Télécharger l'état courant"):
+            try:
+                current_grades_bytes = st.session_state["grade_matrix"].to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Télécharger la matrice de notes actuelle (CSV)",
+                    data=current_grades_bytes,
+                    file_name=f"grades_matrix_{class_name}_CURRENT.csv",
+                    mime="text/csv",
+                )
+            except Exception:
+                st.caption("Matrice de notes indisponible.")
+
+            try:
+                current_meta_bytes = st.session_state["assignment_meta"].to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Télécharger les métadonnées actuelles (CSV)",
+                    data=current_meta_bytes,
+                    file_name=f"assignments_meta_{class_name}_CURRENT.csv",
+                    mime="text/csv",
+                )
+            except Exception:
+                st.caption("Métadonnées indisponibles.")
+
+        # Choisir une sauvegarde
+        labels = [b.name for b in backups]
+        pick = st.selectbox("Choisir une sauvegarde", labels, index=0)
+        chosen_dir = backups[labels.index(pick)]
+
+        # Aperçu
+        man = load_backup_manifest(chosen_dir)
+        st.caption(f"Créée le : {man.get('created_at', chosen_dir.name)}")
+        st.write("Fichiers dans la sauvegarde :")
+        st.code("\n".join(man.get("files", [])) or "(liste indisponible)")
+
+        # Restaurer (écraser)
+        st.markdown("**Option 1 — Écraser les fichiers actuels**")
+        confirm_over = st.checkbox("Je comprends que cela écrase les fichiers actuels pour cette classe.")
+        if st.button("Restaurer (écraser)", disabled=not confirm_over):
+            try:
+                restore_backup_overwrite(chosen_dir, class_name, DATA_DIR)
+                # Recharger en mémoire
+                st.session_state["grade_matrix"] = pd.read_csv(Path(DATA_DIR) / f"grades_matrix_{class_name}.csv")
+                st.session_state["assignment_meta"] = pd.read_csv(Path(DATA_DIR) / f"assignments_meta_{class_name}.csv")
+                st.success("Restauration effectuée. Recharge de la page…")
+                st.rerun()
+            except Exception as e:
+                st.error("Échec de la restauration.")
+                st.exception(e)
+
+        st.markdown("---")
+
+        # Charger comme copie (nouvelle classe)
+        st.markdown("**Option 2 — Créer une nouvelle classe à partir de cette sauvegarde**")
+        default_copy_name = f"{class_name}_restored_{chosen_dir.name}"
+        new_class_name = st.text_input("Nom de la classe copiée", value=default_copy_name)
+        if st.button("Créer une copie à partir de cette sauvegarde"):
+            try:
+                new_class_name = new_class_name.strip()
+                if not new_class_name:
+                    st.warning("Choisissez un nom de classe valide.")
+                else:
+                    restore_backup_as_copy(chosen_dir, class_name, new_class_name, DATA_DIR)
+                    st.success(
+                        f"Copie créée : notes/métadonnées sous « {new_class_name} » "
+                        f"et fichier élèves copié dans {DATA_DIR}."
+                    )
+                    st.info("Sélectionnez cette classe dans la liste principale pour l’ouvrir.")
+            except Exception as e:
+                st.error("Échec de la création de la copie.")
+                st.exception(e)
+                
 # ======================================
 # Tableau complet de la classe (en premier)
 # ======================================

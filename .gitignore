@@ -1,11 +1,31 @@
-# Excel rosters (never commit)
+# --- Virtual envs ---
+.venv/
+venv/
+ENV/
+
+# --- Python caches ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# --- Streamlit local files ---
+.streamlit/**/*
+!.streamlit/config.toml   # keep your theme/config if you use it
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+*.code-workspace
+
+# --- App data (sensitive/generated) ---
 data/**/*.xls
 data/**/*.xlsx
-
-# Generated class data (never commit)
 data/grades_matrix_*.csv
 data/assignments_meta_*.csv
-
-# Backups created by the app
 data/backups/
 *.bak-*
